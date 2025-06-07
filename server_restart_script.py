@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Script to properly restart server and test endpoints.
-Updated to match current API structure.
+Updated to detect and handle route prefix issues.
 """
 import subprocess
 import time
@@ -128,19 +128,88 @@ def start_server():
     
     return process
 
+def detect_route_structure():
+    """Detect the actual route structure by checking different URL patterns"""
+    print("\n🔍 Detecting route structure...")
+    
+    base_url = "http://localhost:8000"
+    
+    # Check OpenAPI schema to understand routes
+    try:
+        response = requests.get(f"{base_url}/openapi.json", timeout=5)
+        if response.status_code == 200:
+            openapi = response.json()
+            paths = list(openapi.get('paths', {}).keys())
+            print(f"   📋 Found {len(paths)} registered paths:")
+            for path in paths[:10]:  # Show first 10
+                print(f"      - {path}")
+            if len(paths) > 10:
+                print(f"      ... and {len(paths) - 10} more")
+            return paths
+    except:
+        pass
+    
+    # Fallback: test common patterns
+    test_patterns = [
+        "/api/v1/submit",
+        "/api/v1/api/v1/submit",  # Double prefix (your case)
+        "/submit",
+        "/api/submit"
+    ]
+    
+    working_patterns = []
+    print("   🧪 Testing common URL patterns...")
+    
+    for pattern in test_patterns:
+        try:
+            # Test with minimal data
+            test_data = {
+                "edad": 5,
+                "sexo": "M",
+                "respuestas": [True] * 40,
+                "acepto_consentimiento": True
+            }
+            response = requests.post(
+                f"{base_url}{pattern}",
+                json=test_data,
+                timeout=2
+            )
+            if response.status_code in [200, 201, 422]:  # 422 is validation error but means endpoint exists
+                working_patterns.append(pattern)
+                print(f"      ✅ {pattern} - EXISTS (status: {response.status_code})")
+            else:
+                print(f"      ❌ {pattern} - NOT FOUND")
+        except:
+            print(f"      ❌ {pattern} - ERROR")
+    
+    return working_patterns
+
 def test_endpoints():
-    """Test all API endpoints with current structure"""
+    """Test all API endpoints with automatic detection of route structure"""
     print("\n🧪 Testing all API endpoints...")
     
+    # First detect the actual route structure
+    detected_routes = detect_route_structure()
+    
+    # Determine if we have double prefix issue
+    has_double_prefix = "/api/v1/api/v1/submit" in detected_routes
+    
+    if has_double_prefix:
+        print("\n⚠️  DETECTED: Double prefix issue! Routes are at /api/v1/api/v1/*")
+        print("   This happens when the router already includes the prefix.")
+        submit_prefix = "/api/v1/api/v1"
+    else:
+        submit_prefix = "/api/v1"
+    
     endpoints = [
-        # Basic endpoints
+        # Basic endpoints (these seem to work correctly)
         {"method": "GET", "path": "/", "name": "Root"},
         {"method": "GET", "path": "/health", "name": "Health Check"},
         {"method": "GET", "path": "/api/v1/health", "name": "API Health"},
         {"method": "GET", "path": "/docs", "name": "API Documentation"},
         {"method": "GET", "path": "/openapi.json", "name": "OpenAPI Schema"},
         
-        # Prediction endpoint
+        # Prediction endpoint (works correctly)
         {
             "method": "POST", 
             "path": "/api/v1/predict", 
@@ -152,10 +221,10 @@ def test_endpoints():
             }
         },
         
-        # Submission endpoint
+        # Submit endpoints (with detected prefix)
         {
             "method": "POST",
-            "path": "/api/v1/submit",
+            "path": f"{submit_prefix}/submit",
             "name": "Submit Evaluation",
             "data": {
                 "edad": 7,
@@ -165,17 +234,17 @@ def test_endpoints():
             }
         },
         
-        # Query endpoints
-        {"method": "GET", "path": "/api/v1/evaluaciones", "name": "List Evaluations"},
-        {"method": "GET", "path": "/api/v1/evaluaciones/1", "name": "Get Evaluation #1"},
-        {"method": "GET", "path": "/api/v1/stats", "name": "Statistics"},
+        # Query endpoints (with detected prefix)
+        {"method": "GET", "path": f"{submit_prefix}/evaluaciones", "name": "List Evaluations"},
+        {"method": "GET", "path": f"{submit_prefix}/evaluaciones/1", "name": "Get Evaluation #1"},
+        {"method": "GET", "path": f"{submit_prefix}/stats", "name": "Statistics"},
     ]
     
     base_url = "http://localhost:8000"
     results = {"success": 0, "failed": 0}
     
-    print(f"\n{'Method':<8} {'Endpoint':<30} {'Status':<8} {'Result'}")
-    print("-" * 70)
+    print(f"\n{'Method':<8} {'Endpoint':<40} {'Status':<8} {'Result'}")
+    print("-" * 80)
     
     for endpoint in endpoints:
         url = f"{base_url}{endpoint['path']}"
@@ -194,33 +263,40 @@ def test_endpoints():
             
             if status < 400:
                 results["success"] += 1
-                print(f"{endpoint['method']:<8} {endpoint['path']:<30} {status:<8} ✅ {endpoint['name']}")
+                print(f"{endpoint['method']:<8} {endpoint['path']:<40} {status:<8} ✅ {endpoint['name']}")
                 
                 # Show sample response for key endpoints
-                if endpoint['path'] in ['/api/v1/predict', '/api/v1/submit'] and status == 200:
-                    data = response.json()
-                    if 'prediction' in data:
-                        prob = data['prediction']['probability']
-                        risk = data['prediction']['risk_level']
-                        print(f"{'':>48} └─ Risk: {prob:.2f} ({risk})")
-                    elif 'probability' in data:
-                        print(f"{'':>48} └─ Risk: {data['probability']:.2f} ({data['risk_level']})")
+                if endpoint['path'].endswith('/predict') or endpoint['path'].endswith('/submit'):
+                    if status in [200, 201]:
+                        data = response.json()
+                        if 'prediction' in data:
+                            prob = data['prediction']['probability']
+                            risk = data['prediction']['risk_level']
+                            print(f"{'':>58} └─ Risk: {prob:.2f} ({risk})")
+                        elif 'probability' in data:
+                            print(f"{'':>58} └─ Risk: {data['probability']:.2f} ({data['risk_level']})")
             else:
                 results["failed"] += 1
-                print(f"{endpoint['method']:<8} {endpoint['path']:<30} {status:<8} ❌ {endpoint['name']}")
+                print(f"{endpoint['method']:<8} {endpoint['path']:<40} {status:<8} ❌ {endpoint['name']}")
                 if response.text and len(response.text) < 100:
-                    print(f"{'':>48} └─ {response.text[:50]}")
+                    print(f"{'':>58} └─ {response.text[:50]}")
                 
         except requests.exceptions.RequestException as e:
             results["failed"] += 1
-            print(f"{endpoint['method']:<8} {endpoint['path']:<30} {'ERROR':<8} 💥 {str(e)[:30]}")
+            print(f"{endpoint['method']:<8} {endpoint['path']:<40} {'ERROR':<8} 💥 {str(e)[:30]}")
     
     # Summary
-    print("\n" + "=" * 70)
+    print("\n" + "=" * 80)
     print(f"📊 ENDPOINT TEST SUMMARY")
-    print("=" * 70)
+    print("=" * 80)
     print(f"✅ Successful: {results['success']} endpoints")
     print(f"❌ Failed: {results['failed']} endpoints")
+    
+    if has_double_prefix:
+        print("\n🔧 FIX NEEDED: Remove duplicate prefix in main.py")
+        print("   Change: app.include_router(submit_router, prefix='/api/v1')")
+        print("   To:     app.include_router(submit_router)")
+        print("   (The submit_router already has prefix='/api/v1' defined)")
     
     return results["failed"] == 0
 
@@ -257,11 +333,38 @@ def check_project_files():
         print("\n   ✅ All required files present")
         return True
 
+def check_router_configuration():
+    """Check router configuration in main.py"""
+    print("\n🔍 Checking router configuration...")
+    
+    try:
+        with open("app/main.py", "r") as f:
+            content = f.read()
+            
+        # Check for duplicate prefix
+        if 'app.include_router(submit_router, prefix="/api/v1"' in content:
+            print("   ⚠️  Found: submit_router with prefix='/api/v1' in main.py")
+            
+            # Check submit.py for existing prefix
+            with open("app/routes/submit.py", "r") as f:
+                submit_content = f.read()
+                if 'prefix="/api/v1"' in submit_content:
+                    print("   ⚠️  Also found: prefix='/api/v1' in submit.py router definition")
+                    print("   ❌ DOUBLE PREFIX DETECTED! This creates /api/v1/api/v1/* routes")
+                    return False
+        
+        print("   ✅ Router configuration looks correct")
+        return True
+        
+    except Exception as e:
+        print(f"   ❌ Error checking configuration: {str(e)}")
+        return False
+
 def main():
-    print("=" * 70)
+    print("=" * 80)
     print("🧠 NEURODEVELOPMENTAL DISORDERS RISK CALCULATOR")
     print("🔄 SERVER RESTART AND TEST SCRIPT")
-    print("=" * 70)
+    print("=" * 80)
     print(f"🕐 Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     # Step 1: Check project files
@@ -269,10 +372,13 @@ def main():
         print("\n❌ Please fix missing files before continuing")
         return
     
-    # Step 2: Kill existing servers
+    # Step 2: Check router configuration
+    check_router_configuration()
+    
+    # Step 3: Kill existing servers
     kill_existing_servers()
     
-    # Step 3: Start new server
+    # Step 4: Start new server
     server_process = start_server()
     
     if not server_process:
@@ -282,22 +388,22 @@ def main():
     # Give server a moment to fully initialize
     time.sleep(2)
     
-    # Step 4: Test endpoints
+    # Step 5: Test endpoints
     all_tests_passed = test_endpoints()
     
-    print("\n" + "=" * 70)
+    print("\n" + "=" * 80)
     print("🏁 SERVER STATUS")
-    print("=" * 70)
+    print("=" * 80)
     
     if all_tests_passed:
         print("✅ Server is running correctly!")
-        print("📍 API URL: http://localhost:8000")
-        print("📚 API Docs: http://localhost:8000/docs")
-        print("🧪 Run tests: python test_api.py")
-        print("🔬 Test ML system: python test_training_system.py")
     else:
-        print("⚠️  Server is running but some endpoints are failing")
-        print("Check the test results above for details")
+        print("⚠️  Server is running but has configuration issues")
+    
+    print("\n📍 API URL: http://localhost:8000")
+    print("📚 API Docs: http://localhost:8000/docs")
+    print("🧪 Run tests: python test_api.py")
+    print("🔬 Test ML system: python test_training_system.py")
     
     print("\n💡 Server is running in the background.")
     print("Press Ctrl+C to stop the server when you're done testing.")
@@ -305,7 +411,7 @@ def main():
     try:
         # Keep script running and show server logs
         print("\n📋 Server logs:")
-        print("-" * 70)
+        print("-" * 80)
         while True:
             output = server_process.stdout.readline()
             if output:
