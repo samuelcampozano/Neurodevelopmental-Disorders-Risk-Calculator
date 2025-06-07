@@ -1,11 +1,12 @@
 """
 Pydantic schemas for the submit endpoint.
 Defines request and response models for evaluation submission.
+Updated for Pydantic V2 compatibility.
 """
 
 from datetime import datetime
 from typing import List, Optional
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 class EvaluacionRequest(BaseModel):
     """
@@ -13,25 +14,27 @@ class EvaluacionRequest(BaseModel):
     """
     edad: int = Field(..., ge=1, le=120, description="User's age (1-120)")
     sexo: str = Field(..., pattern="^[MF]$", description="User's sex (M/F)")
-    respuestas: List[bool] = Field(..., min_items=40, max_items=40, description="40 SCQ questionnaire responses")
+    respuestas: List[bool] = Field(..., min_length=40, max_length=40, description="40 SCQ questionnaire responses")
     acepto_consentimiento: bool = Field(..., description="User consent acceptance")
     
-    @validator('respuestas')
+    @field_validator('respuestas')
+    @classmethod
     def validate_responses(cls, v):
         """Validate that exactly 40 responses are provided."""
         if len(v) != 40:
             raise ValueError('Exactly 40 responses are required')
         return v
     
-    @validator('sexo')
+    @field_validator('sexo')
+    @classmethod
     def validate_sex(cls, v):
         """Validate sex value."""
         if v not in ['M', 'F']:
             raise ValueError('Sex must be either M or F')
         return v.upper()
     
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "edad": 8,
                 "sexo": "M",
@@ -39,6 +42,7 @@ class EvaluacionRequest(BaseModel):
                 "acepto_consentimiento": True
             }
         }
+    )
 
 class PredictionResult(BaseModel):
     """
@@ -59,8 +63,8 @@ class EvaluacionResponse(BaseModel):
     prediction: PredictionResult = Field(..., description="Risk prediction results")
     timestamp: datetime = Field(..., description="Evaluation timestamp")
     
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "success": True,
                 "message": "Evaluación guardada exitosamente",
@@ -74,6 +78,7 @@ class EvaluacionResponse(BaseModel):
                 "timestamp": "2024-01-15T10:30:00"
             }
         }
+    )
 
 class ErrorResponse(BaseModel):
     """
@@ -83,14 +88,15 @@ class ErrorResponse(BaseModel):
     error: str = Field(..., description="Error message")
     detail: Optional[str] = Field(None, description="Detailed error information")
     
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "success": False,
                 "error": "Validation error",
                 "detail": "Age must be between 1 and 120"
             }
         }
+    )
 
 class EvaluacionSummary(BaseModel):
     """
@@ -103,8 +109,7 @@ class EvaluacionSummary(BaseModel):
     fecha: datetime = Field(..., description="Evaluation date")
     acepto_consentimiento: bool = Field(..., description="Consent status")
     
-    class Config:
-        from_attributes = True  # For SQLAlchemy model compatibility
+    model_config = ConfigDict(from_attributes=True)
 
 class EvaluacionDetail(EvaluacionSummary):
     """
@@ -112,5 +117,29 @@ class EvaluacionDetail(EvaluacionSummary):
     """
     respuestas: List[bool] = Field(..., description="SCQ questionnaire responses")
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+class StatsResponse(BaseModel):
+    """
+    Schema for statistics endpoint response.
+    """
+    total_evaluations: int = Field(..., description="Total number of evaluations")
+    risk_distribution: dict = Field(..., description="Distribution by risk level")
+    gender_distribution: dict = Field(..., description="Distribution by gender")
+    
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "total_evaluations": 150,
+                "risk_distribution": {
+                    "high_risk": 15,
+                    "medium_risk": 45,
+                    "low_risk": 90
+                },
+                "gender_distribution": {
+                    "male": 80,
+                    "female": 70
+                }
+            }
+        }
+    )
