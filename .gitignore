@@ -312,3 +312,54 @@ development/
 # Performance monitoring
 .profiling/
 profiling_results/
+
+# PostgreSQL specific (if using PostgreSQL)
+POSTGRES_USER=ndd_user
+POSTGRES_PASSWORD=your_postgres_password
+POSTGRES_DB=ndd_calculator
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+
+# Environment Configuration File
+# Copy this to .env and update with your actual values
+# IMPORTANT: Never commit .env to version control!
+
+# Environment: development, staging, production
+ENV=development
+
+# Security Keys (CHANGE THESE IN PRODUCTION!)
+SECRET_KEY=your-super-secret-key-change-this-in-production-use-openssl-rand-hex-32
+API_KEY=your-api-key-for-authentication-change-this
+
+# Database Configuration
+# For PostgreSQL (production):
+DATABASE_URL=postgresql://username:password@localhost:5432/ndd_calculator
+
+# For SQLite (development):
+# DATABASE_URL=sqlite:///./data/ndd_calculator.db
+
+# CORS Configuration (comma-separated origins)
+# For development with React on localhost:3000
+CORS_ORIGINS=http://localhost:3000,http://localhost:8080
+
+# For production (replace with your actual domain):
+# CORS_ORIGINS=https://yourdomain.com,https://www.yourdomain.com
+
+# JWT Token Configuration
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+
+# Model Configuration
+MODEL_PATH=data/modelo_entrenado.pkl
+MIN_DATA_FOR_RETRAIN=50
+MIN_ACCURACY_THRESHOLD=0.7
+
+# Logging
+LOG_LEVEL=INFO
+
+# Server Configuration
+HOST=0.0.0.0
+PORT=8000
+
+
+#ignore whole data directory
+data/

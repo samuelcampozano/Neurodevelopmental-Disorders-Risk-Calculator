@@ -341,6 +341,5 @@ For questions, issues, or collaboration opportunities:
 
 - **Issues**: Use GitHub Issues for bug reports
 - **Discussions**: Use GitHub Discussions for questions
-- **Contact**: [Your professional email]
-
+- **Contact**: samuelco860@gmail.com
 **⭐ If this project helps your work, please consider giving it a star!**
