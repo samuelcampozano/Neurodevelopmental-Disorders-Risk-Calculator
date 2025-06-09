@@ -1,11 +1,12 @@
 """
 Routes for handling evaluation submissions and database operations.
+Updated with authentication for sensitive endpoints.
 """
 
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 
 from app.database import get_db
 from app.models.evaluacion import Evaluacion
@@ -18,6 +19,7 @@ from app.schemas.submit import (
     EvaluacionDetail,
     PredictionResult
 )
+from app.auth import require_token, TokenData
 
 # Create router instance
 router = APIRouter(
@@ -25,6 +27,7 @@ router = APIRouter(
     tags=["evaluations"],
     responses={
         400: {"model": ErrorResponse, "description": "Bad Request"},
+        401: {"description": "Unauthorized"},
         500: {"model": ErrorResponse, "description": "Internal Server Error"}
     }
 )
@@ -34,7 +37,7 @@ router = APIRouter(
     response_model=EvaluacionResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Submit new evaluation",
-    description="Submit a new neurodevelopmental disorder risk evaluation with SCQ responses"
+    description="Submit a new neurodevelopmental disorder risk evaluation with SCQ responses (PUBLIC endpoint)"
 )
 async def submit_evaluation(
     request: EvaluacionRequest,
@@ -42,6 +45,8 @@ async def submit_evaluation(
 ) -> EvaluacionResponse:
     """
     Submit a new evaluation for neurodevelopmental disorder risk assessment.
+    
+    This is a PUBLIC endpoint - no authentication required.
     
     This endpoint:
     1. Validates the input data
@@ -102,21 +107,26 @@ async def submit_evaluation(
 @router.get(
     "/evaluaciones",
     response_model=List[EvaluacionSummary],
-    summary="Get evaluations list",
-    description="Retrieve a list of all evaluations (summary view)"
+    summary="Get evaluations list (Protected)",
+    description="Retrieve a list of all evaluations (requires authentication)",
+    dependencies=[Depends(require_token)]
 )
 async def get_evaluaciones(
     limit: int = 100,
     offset: int = 0,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    token_data: TokenData = Depends(require_token)
 ) -> List[EvaluacionSummary]:
     """
     Get a list of evaluations with pagination.
+    
+    This is a PROTECTED endpoint - requires authentication.
     
     Args:
         limit: Maximum number of records to return (default: 100)
         offset: Number of records to skip (default: 0)
         db: Database session
+        token_data: Authentication token data
         
     Returns:
         List of evaluation summaries
@@ -139,19 +149,24 @@ async def get_evaluaciones(
 @router.get(
     "/evaluaciones/{evaluation_id}",
     response_model=EvaluacionDetail,
-    summary="Get evaluation details",
-    description="Retrieve detailed information for a specific evaluation"
+    summary="Get evaluation details (Protected)",
+    description="Retrieve detailed information for a specific evaluation (requires authentication)",
+    dependencies=[Depends(require_token)]
 )
 async def get_evaluacion_detail(
     evaluation_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    token_data: TokenData = Depends(require_token)
 ) -> EvaluacionDetail:
     """
     Get detailed information for a specific evaluation.
     
+    This is a PROTECTED endpoint - requires authentication.
+    
     Args:
         evaluation_id: ID of the evaluation to retrieve
         db: Database session
+        token_data: Authentication token data
         
     Returns:
         Detailed evaluation information including responses
@@ -179,12 +194,18 @@ async def get_evaluacion_detail(
 
 @router.get(
     "/stats",
-    summary="Get evaluation statistics",
-    description="Get basic statistics about stored evaluations"
+    summary="Get evaluation statistics (Protected)",
+    description="Get basic statistics about stored evaluations (requires authentication)",
+    dependencies=[Depends(require_token)]
 )
-async def get_evaluation_stats(db: Session = Depends(get_db)):
+async def get_evaluation_stats(
+    db: Session = Depends(get_db),
+    token_data: TokenData = Depends(require_token)
+):
     """
     Get basic statistics about stored evaluations.
+    
+    This is a PROTECTED endpoint - requires authentication.
     
     Returns:
         Dictionary with evaluation statistics
@@ -215,6 +236,10 @@ async def get_evaluation_stats(db: Session = Depends(get_db)):
                         .filter(Evaluacion.sexo == 'F')\
                         .count()
         
+        # Average age
+        from sqlalchemy import func
+        avg_age = db.query(func.avg(Evaluacion.edad)).scalar() or 0
+        
         return {
             "total_evaluations": total_evaluations,
             "risk_distribution": {
@@ -225,7 +250,41 @@ async def get_evaluation_stats(db: Session = Depends(get_db)):
             "gender_distribution": {
                 "male": male_count,
                 "female": female_count
-            }
+            },
+            "demographics": {
+                "average_age": round(float(avg_age), 1)
+            },
+            "accessed_by": token_data.username,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error getting statistics: {str(e)}"
+        )
+
+# Public endpoint for basic statistics (no sensitive data)
+@router.get(
+    "/stats/public",
+    summary="Get public statistics",
+    description="Get basic public statistics (no authentication required)"
+)
+async def get_public_stats(db: Session = Depends(get_db)):
+    """
+    Get basic public statistics about the system.
+    
+    This is a PUBLIC endpoint - no authentication required.
+    Only returns non-sensitive aggregate data.
+    """
+    try:
+        total_evaluations = db.query(Evaluacion).count()
+        
+        return {
+            "total_evaluations_processed": total_evaluations,
+            "system_status": "operational",
+            "model_version": "1.0.0",
+            "last_update": datetime.utcnow().isoformat()
         }
         
     except Exception as e:
